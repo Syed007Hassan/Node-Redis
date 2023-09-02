@@ -1,13 +1,33 @@
 import express from 'express';
 import axios from 'axios';
 import redis from 'redis';
+import dotenv from 'dotenv';
+import morgan from 'morgan';
+import helmet from 'helmet';
+import cors from 'cors';
+import compression from 'compression';
+
+dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
+
+app.use(morgan('tiny'));
+app.use(helmet());
+app.use(cors());
+app.use(compression());
+app.use(express.json());
+
+
 let redisClient;
 
-// fetch data from api
+(async () => {
+  redisClient = redis.createClient();
+  redisClient.on("error", (error) => console.error(`Error : ${error}`));
+  await redisClient.connect();
+})();
+
 const fetchDataFromApi = async (characterId) => {
   let apiUrl = 'https://hp-api.onrender.com/api';
   if (characterId) {
@@ -20,7 +40,6 @@ const fetchDataFromApi = async (characterId) => {
   return apiResponse.data;
 }
 
-// cache data in redis
 const cacheData = async (req, res, next) => {
   try {
     const characterId = req.params.id;
@@ -39,21 +58,20 @@ const cacheData = async (req, res, next) => {
     }
   } catch (error) {
     console.error(error);
-    res.status(404);
+    res.status(404).send("Data unavailable");
   }
 }
 
-// fetch character by id
 app.get("/hogwarts/characters/:id", cacheData, async (req, res) => {
   try {
     const redisKey = `hogwarts-character-${req.params.id}`;
-    results = await fetchDataFromApi(req.params.id);
+    const results = await fetchDataFromApi(req.params.id);
     if (!results.length) {
       throw new Error("Data unavailable");
     }
     await redisClient.set(redisKey, JSON.stringify(results), {
-      EX: 120,  //EX: accepts a value with the cache duration in seconds.
-      NX: true, //NX: when set to true, it ensures that the set() method should only set a key that doesn’t already exist in Redis.
+      EX: process.env.REDIS_EXPIRY_TIME,
+      NX: true,
     });
 
     return res.status(200).send({
@@ -66,18 +84,15 @@ app.get("/hogwarts/characters/:id", cacheData, async (req, res) => {
   }
 });
 
-// fetch all characters
 app.get("/hogwarts/characters", cacheData, async (req, res) => {
-  
-  let results;
   try {
     const redisKey = "hogwarts-characters";
-    results = await fetchDataFromApi();
+    const results = await fetchDataFromApi();
     if (!results.length) {
       throw new Error("Data unavailable");
     }
     await redisClient.set(redisKey, JSON.stringify(results), {
-      EX: 120,
+      EX: process.env.REDIS_EXPIRY_TIME,
       NX: true,
     });
 
@@ -92,13 +107,10 @@ app.get("/hogwarts/characters", cacheData, async (req, res) => {
 });
 
 app.listen(port, () => {
-  (async () => {
-    redisClient = redis.createClient();
-    redisClient.on("error", (error) => console.error(`Error : ${error}`));
-    await redisClient.connect();
-  })();
+
+
   if(redisClient){
-    console.log("Redis connected");
+    console.log("Connected to Redis");
   }
   console.log(`App listening on port ${port}`);
 });
