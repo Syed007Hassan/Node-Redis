@@ -68,6 +68,8 @@ app.get("/hogwarts/characters/:id", cacheData, async (req, res) => {
 
 // fetch all characters
 app.get("/hogwarts/characters", cacheData, async (req, res) => {
+  
+  let results;
   try {
     const redisKey = "hogwarts-characters";
     results = await fetchDataFromApi();
